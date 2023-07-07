@@ -1,0 +1,32 @@
+export PATH=/usr/local/cuda/bin:$PATH
+export DYLD_LIBRARY_PATH=/usr/local/cuda/lib:$DYLD_LIBRARY
+
+ln -s /usr/local/opt/gcc/lib/gcc/5/libgomp.dylib /usr/local/lib/libgomp.dylib
+
+nvcc --default-stream per-thread -lcurand -o test RRG.cu 
+
+nvprof —f -o analysis.nvprof ./test Instancias/Tominaga2SSGeneratedData.txt Salidas/salidachih.txt
+
+PATH=$PATH:/usr/local/bin
+export PATH
+
+pwd
+
+watch -n 0.5 nvidia-smi
+
+aflores
+ADIG7a0wC
+
+
+
+kJarka3s
+
+scp ertello@chronos.tamps.cinvestav.mx:GeneRN/RRG/analysis.nvprof .
+
+last | more
+
+module load cuda/7.0nv
+
+scp RRGThreadsMultipleGPU.cu  ertello@chronos.tamps.cinvestav.mx:GeneRN/RRG/.
+
+cuda-memcheck --leak-check full --racecheck-report all ./test Instancias/Tominaga2SSGeneratedData.txt Salidas/salida2.txt

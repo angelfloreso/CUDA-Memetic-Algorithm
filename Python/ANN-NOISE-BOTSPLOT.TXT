@@ -1,0 +1,25 @@
+#set terminal png transparent nocrop enhanced size 450,320 font "arial,8" 
+#set output 'boxplot.1.png'
+set border 0.2 front lt black linewidth 0.001 dashtype solid
+set style boxplot sorted
+set title "Instancia ANN5 con diferente cantidad de ruido\n"
+
+set boxwidth 0.5 absolute
+set style fill   solid 0.25 border lt -1
+unset key
+set pointsize 1
+set style data boxplot
+set xtics border in scale 0,0 nomirror norotate
+set xtics  norangelimit
+set xtics   ("1%% Ruido" 0, "2%% Ruido" 1, "5%% Ruido" 2, "10%% Ruido" 3)
+set ytics border in scale 0.001,0.5 nomirror norotate
+
+
+set format y '%g'
+#set format y "1e^{%L}"
+
+set yrange [0:0.014]
+set ytics 0, 0.001, 0.014
+x = 0.0
+## Last datafile plotted: "silver.dat"
+plot 'ANN-NOISE.txt' using (0):1, '' using (1):2, '' using (2):3, '' using (3):4
