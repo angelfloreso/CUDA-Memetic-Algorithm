@@ -22,10 +22,10 @@
 #define FPARAM  0.04f								// Parametro F para la ED
 #define MAXRAND 50       							// Tamano del vector de valores random
 
-#define HILOS_X 32									// Hilos y Bloques para Kernels
-#define HILOS_Y 32
-#define BLOQUES_X 32
-#define BLOQUES_Y 32
+#define HILOS_X 8									// Hilos y Bloques para Kernels
+#define HILOS_Y 8
+#define BLOQUES_X 8
+#define BLOQUES_Y 8
 
 #define MAXGij  4.0									// Rangos de exploracion
 #define MINGij -4.0

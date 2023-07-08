@@ -1,5 +1,17 @@
 # CUDA Accelerated Memetic Algorithm for Gene Regulatory Networks inference models.
 
+# Compile
+nvcc --default-stream per-thread -lcurand -o test RRG.cu 
+
+# Profiler analysis
+nvprof —f -o analysis.nvprof ./test Instancias/Tominaga2SSGeneratedData.txt Salidas/salidachih.txt
+
+
+# Check gpu proccess
+watch -n 0.5 nvidia-smi
+
+# Memcheck
+cuda-memcheck --leak-check full --racecheck-report all ./test Instancias/Tominaga2SSGeneratedData.txt Salidas/salida2.txt
 
 
 # References
