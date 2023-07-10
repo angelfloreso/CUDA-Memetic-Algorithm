@@ -1,6 +1,7 @@
 # CUDA Accelerated Memetic Algorithm for Gene Regulatory Networks inference models.
 
 # Requeriments
+Ubuntu 16.04
 Cuda compilation tools, release 7.5, V7.5.17
 
 # Compile
