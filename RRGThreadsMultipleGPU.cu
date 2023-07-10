@@ -16,8 +16,8 @@ nvcc --default-stream per-thread -lcurand -O2 -o test RRGThreadsMultipleGPU.cu
 #include <curand_kernel.h>
 #include <pthread.h>
 
-#define POPSIZE 64
-#define GMAX	50
+#define POPSIZE 128
+#define GMAX	1000
 #define F       0.04f
 
 #define HILOS_X 16
@@ -37,7 +37,7 @@ nvcc --default-stream per-thread -lcurand -O2 -o test RRGThreadsMultipleGPU.cu
 #define CORRIDAS 20
 
 /* Define el número maximo de procesos que se pueden ejecutar al mismo tiempo en GPU */
-#define STREAMS 2
+#define STREAMS 1
 
 /* Define el número maximo de GPUs que se pueden utilizar (0 = Todos los GPUs disponibles) */
 #define GPUS 0

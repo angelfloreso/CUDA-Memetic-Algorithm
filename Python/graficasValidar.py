@@ -3,15 +3,13 @@ import numpy
 from matplotlib.legend_handler import HandlerLine2D
 
 archivo = 'salida'
-graficar = 2
+graficar = 20
 
 path = 'Z:/'
 
 entrada = path + 'Instancias/Tominaga2SSGeneratedData.txt'
 salida = path + 'Salidas/'+archivo+'.txt'
-
 corridas = 20
-
 valoresOrd = {}
 calculados = {}
 boxplot = []
@@ -59,8 +57,8 @@ def leerSalida(path):
             #print (datos[1])
             boxplot.append()
 
-    keylist = valoresOrd.keys()
-    #sort(keylist)
+    keylist = list(valoresOrd.keys())
+    sort(keylist)
     valores = [valoresOrd[key] for key in keylist]
     return valores
 
@@ -82,7 +80,7 @@ def procesar():
                 #print (a, b, corrida)
                 a=0
                 b=ntiempos
-                corrida+=1
+                #corrida+=1
                 if corrida == corridas+1:
                     serie+=1
                     corrida = 1
@@ -104,7 +102,6 @@ def generaGrafica():
             plt.ylabel("Valor", fontsize = 20)
             plt.plot(x, y, label="Original")
             #print "Serie", y, len(y)
-
             matrix = []
             for item3 in range(graficar):
                 try:
@@ -135,7 +132,6 @@ xGenes = []
 for item in valores[0]: xGenes += [item2 for item2 in item]
 
 def RK():
-
     def SSystem(x):
         evaluation = []
         for i in range(ngen):

@@ -4,7 +4,7 @@
 	Compilar con las banderas: nvcc --default-stream per-thread -lcurand -O2 -o test RRGDiver.cu
 
     @author AF
-    @version 1.3 12/05/16 
+    @version 1.3 06/09/16 
 */
 
 #include <stdio.h>
@@ -17,13 +17,14 @@
 #include <curand_kernel.h>
 #include <pthread.h>
 
-#define POPSIZE 1024 								// Tamano de la poblacion
+#define POPSIZE 256 								// Tamano de la poblacion
 #define GMAX	1000								// Numero de generaciones
+#define PSOGEN 	500							// Numero de iteraciones PSO
 #define FPARAM  0.04f								// Parametro F para la ED
 #define MAXRAND 50       							// Tamano del vector de valores random
 
-#define HILOS_X 32									// Hilos y Bloques para Kernels
-#define HILOS_Y 32
+#define HILOS_X 16									// Hilos y Bloques para Kernels
+#define HILOS_Y 16
 #define BLOQUES_X 16
 #define BLOQUES_Y 16
 
@@ -36,16 +37,35 @@
 #define MAXBETA 20.0
 #define MINBETA 0.0
 
+/**
+    Variables de rendimiento
+*/
 #define CORRIDAS 20									// Numero de corridas
 #define STREAMS 2									// Procesos simultaneos
 #define GPUS 0 										// Maximos de GPUs (0 = Sin limite)
-#define DIVERSIDAD 30 								// Cantidad de generaciones sin mejorar fitness
-#define REMPDIV 0.7									// Porcentaje de remplazo en diversidad
 
-#define PCOEF 0.0										// Coeficiente de penalización
+/**
+    Diversidad
+*/
+#define DIVERSIDAD 50 								// Cantidad de generaciones sin mejorar fitness
+#define REMPDIV 0.7 								// Porcentaje de remplazo en diversidad
+
+/**
+    PSO
+*/
+
+#define WPSO 0.7
+#define C1 1.4
+#define C2 1.4
+
+/**
+    Prioridad a G y H ceros
+*/
+#define PCOEF 0.01									// Coeficiente de penalización
 #define PROF 2										// Profundidad de busqueda
+#define UMBR 0.05									// Umbral de skeletalizing
 
-#define DEBUG false									// Porcentaje de remplazo en diversidad
+#define DEBUG false									// Debuguer
 
 typedef struct ThreadParams {						// Parametros para la funcion pthreads
 	int serie;										// Serie que se esta evaluando
@@ -102,6 +122,7 @@ float ***RMSE;
 float ***RMSE_D;
 int ***mustChange_D;
 int ***randomIndices_D;
+int nswarm, ndim;
 
 dim3 bloque(HILOS_X,HILOS_Y);						// Dimenciones de bloques e hilos
 dim3 malla(BLOQUES_X,BLOQUES_Y);
@@ -173,28 +194,30 @@ __device__ float SSystem(float *X, int i, int ngen, float * G, float * H, float 
     @change Se modifico el metodo para que se evaluaran todos los tiempos en un hilo diferente.
 
 */
-__device__ void rungeKutta(float *G, float * H, float *alph, float * beta, float *X, float *B, float *w, float * k, int numeroTiempos, int numeroGenes, float h, int i, int genActual){
-	
-	w[genActual] = X[genActual*numeroTiempos+i];
-
-	k[genActual] = h*SSystem( w,genActual, numeroGenes, G,H, alph, beta);
-
-	w[genActual] = X[genActual*numeroTiempos+i]+k[0+genActual]/2;
-
-	k[1*numeroGenes+genActual] = h*SSystem(  w,genActual, numeroGenes, G,H, alph, beta);
-
-	w[genActual] = X[genActual*numeroTiempos+i]+k[1*numeroGenes+genActual]/2;
-
-	k[2*numeroGenes+genActual] = h*SSystem(  w,genActual, numeroGenes, G,H, alph, beta);
-
-	w[genActual] = X[genActual*numeroTiempos+i]+k[2*numeroGenes+genActual];
-
-	k[3*numeroGenes+genActual] = h*SSystem( w,genActual, numeroGenes, G,H, alph, beta);
-
-	X[genActual*numeroTiempos+i+1] = X[genActual*numeroTiempos+i]+(k[0+genActual]+2*k[1*numeroGenes+genActual]+2*k[2*numeroGenes+genActual]+k[3*numeroGenes+genActual])/6;
-	if(X[genActual*numeroTiempos+i+1] < 0)
-		X[genActual*numeroTiempos+i+1] = 0;
-	
+__device__ void rungeKutta(float *G, float * H, float *alph, float * beta, float *X, float *B, float *w, float * k, int numeroTiempos, int numeroGenes, float h, int i){
+	int j;
+		
+	for(j = 0; j < numeroGenes; j++)
+		w[j] = X[j*numeroTiempos+i];
+	for(j = 0; j < numeroGenes; j++)
+		k[j] = h*SSystem( w,j, numeroGenes, G,H, alph, beta);
+	for(j = 0; j < numeroGenes; j++)
+		w[j] = X[j*numeroTiempos+i]+k[0+j]/2;
+	for(j = 0; j < numeroGenes; j++)
+		k[1*numeroGenes+j] = h*SSystem(  w,j, numeroGenes, G,H, alph, beta);
+	for(j = 0; j < numeroGenes; j++)
+		w[j] = X[j*numeroTiempos+i]+k[1*numeroGenes+j]/2;
+	for(j = 0; j < numeroGenes; j++)
+		k[2*numeroGenes+j] = h*SSystem(  w,j, numeroGenes, G,H, alph, beta);
+	for(j = 0; j < numeroGenes; j++)
+		w[j] = X[j*numeroTiempos+i]+k[2*numeroGenes+j];
+	for(j = 0; j < numeroGenes; j++)
+		k[3*numeroGenes+j] = h*SSystem( w,j, numeroGenes, G,H, alph, beta);
+	for(j = 0; j < numeroGenes; j++){
+		X[j*numeroTiempos+i+1] = X[j*numeroTiempos+i]+(k[0+j]+2*k[1*numeroGenes+j]+2*k[2*numeroGenes+j]+k[3*numeroGenes+j])/6;
+		if(X[j*numeroTiempos+i+1] < 0)
+			X[j*numeroTiempos+i+1] = 0;
+	}
 
 }
 
@@ -281,7 +304,7 @@ __device__ void errorCuadraticoMedio(float *X_i, float *realData, float *aptitud
     @change se agrego un desplazamiento a las variables W y K, ya que se traslapaba la informacion 
     y no se hacia correctamente la evaluacion
 */
-__global__ void evaluaPoblacion(float *poblacion,float *realData, float *W, float *K, int numeroTiempos,int numeroGenes,float h,int indSize,float *aptitud, float *auxiliar, int genActual){
+__global__ void evaluaPoblacion(float *poblacion,float *realData, float *W, float *K, int numeroTiempos,int numeroGenes,float h,int indSize,float *aptitud, float *auxiliar){
 	int i = threadIdx.x + (blockIdx.x * blockDim.x);	
 	int j;
 	int k = 0;
@@ -301,12 +324,12 @@ __global__ void evaluaPoblacion(float *poblacion,float *realData, float *W, floa
 		
 		/*Resolvemos el sistema de ecuaciones diferenciales para obtener las predicciones X_i*/
 		
-		
-		X_i[numeroTiempos*genActual] = realData[numeroTiempos*genActual];
+		for(j = 0; j < numeroGenes; j++)
+			X_i[numeroTiempos*j] = realData[numeroTiempos*j];
 		
 		k = 0;
 		while(k < numeroTiempos-1){
-			rungeKutta(G_i,H_i,A_i,B_i,X_i,realData,W,K,numeroTiempos,numeroGenes,h, k, genActual);
+			rungeKutta(G_i,H_i,A_i,B_i,X_i,realData,W,K,numeroTiempos,numeroGenes,h, k);
 			__syncthreads();
 			k += 1;
 		}
@@ -316,6 +339,85 @@ __global__ void evaluaPoblacion(float *poblacion,float *realData, float *W, floa
 		i += blockDim.x * gridDim.x;
 
 	}
+}
+
+__global__ void iniSwarm(float *swarm, float *pbest, int indSize, float *vMatrix, float *randomValues){
+	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	int j = threadIdx.y + blockIdx.y * blockDim.y;
+
+	while(i < POPSIZE){
+
+		while( j < indSize){
+			pbest[j+i*indSize] = swarm[j+i*indSize];
+
+			vMatrix[j+i*indSize] = randomValues[j+i*indSize];
+
+			j += blockDim.y * gridDim.y;
+		}
+		i += blockDim.x * gridDim.x;
+	}
+	
+}
+
+__global__ void swarmPSO(float *swarm, float *gbest, float *pbest, float *vMatrix,int indSize,int solucionSize, float *randomValues, int GSize, int HSize, int aSize, int bSize){
+	int i = threadIdx.x + blockIdx.x * blockDim.x;
+	int j = threadIdx.y + blockIdx.y * blockDim.y;
+	int k = 0;	
+	float upperBound,lowerBound;
+
+	while(i < POPSIZE){
+
+		while( j < indSize-solucionSize){
+
+			//pbest[j+i*indSize] = pbest[j+i*indSize] - swarm[j+i*indSize];
+			//swarm[j+i*indSize] = gbest[j] - swarm[j+i*indSize];
+
+			vMatrix[j+i*indSize] = WPSO * vMatrix[j+i*indSize] + C1 * (randomValues[k+i*indSize] * pbest[j+i*indSize] - swarm[j+i*indSize]) + C2 * (randomValues[(k+1)+i*indSize] * gbest[j] - swarm[j+i*indSize]);
+
+
+			if(j < GSize){
+				upperBound = MAXGij;
+				lowerBound = MINGij;
+			}else if( j < GSize+HSize){
+				upperBound = MAXHij;
+				lowerBound = MINHij;
+			}else if(j < GSize+HSize+aSize){
+				upperBound = MAXALPHA;
+				lowerBound = MINALPHA;		
+			}else if(j < GSize+HSize+aSize+bSize){
+				upperBound = MAXBETA;
+				lowerBound = MINBETA;		
+			}
+
+			swarm[j+i*indSize] += vMatrix[j+i*indSize];
+
+			//printf("%f, %f, %f, %d, %d\n", swarm[j+i*indSize], upperBound, lowerBound, swarm[j+i*indSize] > upperBound, swarm[j+i*indSize] < lowerBound);
+
+			if (swarm[j+i*indSize] > upperBound || swarm[j+i*indSize] < lowerBound ){
+
+				//printf("cambiando valor %f, %f, %f\n", swarm[j+i*indSize], upperBound, lowerBound);
+
+				swarm[j+i*indSize] = lowerBound + randomValues[k+i*indSize]*(upperBound-lowerBound);
+
+				//printf("nuevo valor %f, %f, %f\n", swarm[j+i*indSize], upperBound, lowerBound);
+			}
+
+			//else{
+
+				//printf("no cambio valor %f, %f, %f\n", swarm[j+i*indSize], upperBound, lowerBound);
+
+				
+			//}
+
+			//veridicar que se encuentre dentro de los limites
+			
+			//printf("i %d, j %d, %f, %f\n",i, j, swarm[j+i*indSize], gbest[j]);
+			k += 2;
+			j += blockDim.y * gridDim.y;
+		}
+		i += blockDim.x * gridDim.x;
+	}
+	
 }
 
 /**
@@ -473,6 +575,7 @@ __global__ void diversifica(float *poblacion, float *aptitud, int indSize, int G
 	int i = threadIdx.x + blockIdx.x * blockDim.x;
 	int j = threadIdx.y + blockIdx.y * blockDim.y;
 	int k;
+	bool lower = false;
 	float upperBound,lowerBound;
 	float pMutacion = 0;
 
@@ -483,9 +586,11 @@ __global__ void diversifica(float *poblacion, float *aptitud, int indSize, int G
 				if(j < GSize){
 					upperBound = MAXGij;
 					lowerBound = MINGij;
+					lower = true;
 				}else if( j < GSize+HSize){
 					upperBound = MAXHij;
-					lowerBound = MINHij;		
+					lowerBound = MINHij;	
+					lower = true;	
 				}else if(j < GSize+HSize+aSize){
 					upperBound = MAXALPHA;
 					lowerBound = MINALPHA;		
@@ -493,9 +598,10 @@ __global__ void diversifica(float *poblacion, float *aptitud, int indSize, int G
 					upperBound = MAXBETA;
 					lowerBound = MINBETA;		
 				}
-				if(randomValues[(i*(indSize-solucionSize)+j)+randControl] > pMutacion)
+				if(randomValues[(i*(indSize-solucionSize)+j)+randControl] > pMutacion){
 					poblacion[k] = lowerBound + randomValues[(i*(indSize-solucionSize)+j)+randControl]*(upperBound-lowerBound);
-										
+					if (lower && abs(poblacion[k]) < UMBR) poblacion[k] = 0;
+				}
 				j += blockDim.y * gridDim.y;
 			}
 		}
@@ -539,6 +645,7 @@ __global__ void inicializaPoblacion(float *poblacion,int indSize, int GSize, int
     int i = threadIdx.x + blockIdx.x * blockDim.x;
 	int j = threadIdx.y + blockIdx.y * blockDim.y;
 	int k;
+	bool lower = false;
 	float upperBound,lowerBound;
 	*bestSoFar = FLT_MAX;
 	*numBSF = 0;
@@ -550,9 +657,11 @@ __global__ void inicializaPoblacion(float *poblacion,int indSize, int GSize, int
 			if(j < GSize){
 				upperBound = MAXGij;
 				lowerBound = MINGij;
+				lower = true;
 			}else if( j < GSize+HSize){
 				upperBound = MAXHij;
-				lowerBound = MINHij;		
+				lowerBound = MINHij;
+				lower = true;		
 			}else if(j < GSize+HSize+aSize){
 				upperBound = MAXALPHA;
 				lowerBound = MINALPHA;		
@@ -562,7 +671,10 @@ __global__ void inicializaPoblacion(float *poblacion,int indSize, int GSize, int
 			}else{
 				upperBound = lowerBound = 0;
 			}
-			poblacion[k] = lowerBound + randomValues[i*(indSize-solucionSize)+j]*(upperBound-lowerBound);			
+			poblacion[k] = lowerBound + randomValues[i*(indSize-solucionSize)+j]*(upperBound-lowerBound);
+
+			if (lower && abs(poblacion[k]) < UMBR) poblacion[k] = 0;
+					
 			j += blockDim.y * gridDim.y;
 		}
 		i += blockDim.x * gridDim.x;
@@ -579,6 +691,9 @@ void init(int numGpus){
 	individuoSize_H = GSize_H + HSize_H + AlphaSize_H + BetaSize_H + solucionSize_H;
 	MValor = sqrt( (numeroGenes*powf(MINGij-MAXGij,2)) + (numeroGenes*powf(MINHij-MAXHij,2)) + (numeroGenes*numeroGenes*powf(MINALPHA-MAXALPHA,2)) + (numeroGenes*numeroGenes*powf(MINBETA-MAXBETA,2)) );
 	
+	nswarm = POPSIZE;
+	ndim = individuoSize_H;
+
 	datosReales = 															(float*) malloc(sizeof(float)*numeroGenes*numeroTiempos);
 	poblacion_D = 															(float***) malloc(sizeof(float**) * numGpus);
 	fitness_D = 															(float***) malloc(sizeof(float**) * numGpus);
@@ -685,7 +800,7 @@ void initDeviceControl(int deviceId, int control){
 	CUDA_CALL(cudaMalloc(&W_D[deviceId][control],						 	sizeof(float)*numeroGenes*POPSIZE*numeroTiempos*2));
 	CUDA_CALL(cudaMalloc(&K_D[deviceId][control],						 	sizeof(float)*4*numeroGenes*POPSIZE*numeroTiempos*2));
 	
-	CUDA_CALL(cudaMalloc(&auxiliar[deviceId][control],						sizeof(float) *POPSIZE*POPSIZE));
+	CUDA_CALL(cudaMalloc(&auxiliar[deviceId][control],						sizeof(float) *POPSIZE*POPSIZE*individuoSize_H));
 	CUDA_CALL(cudaMalloc(&minGoodness[deviceId][control],					sizeof(float)));
 
 	CUDA_CALL( cudaHostAlloc((void**) &numBSF[deviceId][control],			sizeof(int), cudaHostAllocMapped) );
@@ -800,6 +915,9 @@ __global__ void cruzaPoblacion(float *poblacion,float *poblacionSiguiente,int in
 				/*TODO:Tomar en cuenta los limites*/
 				/*Differential Evolution, Noman2005*/
 				poblacionSiguiente[k] = poblacion[r1] + FPARAM*( poblacion[r2] - poblacion[r3] );
+
+				if (abs(poblacionSiguiente[k]) < UMBR) poblacionSiguiente[k] = 0;
+
 			}else{
 			/*Normal*/
 				poblacionSiguiente[k] = poblacion[k];
@@ -811,7 +929,18 @@ __global__ void cruzaPoblacion(float *poblacion,float *poblacionSiguiente,int in
 
 }
 
-void imprime(float *poblacion, int indSize, int salto, float *fitnesscopia){
+__global__ void PSOSearch(float *mejorIndividuo, int indSize, float fitness){
+
+	for (int i = 0; i < indSize; ++i) {
+		printf("%f, ", mejorIndividuo[i]);
+	}
+	printf("fitness %f\n\n", fitness);
+	
+	printf("\n");
+	printf("\n");
+}
+
+void imprime(float *poblacion, int indSize, int salto, float *fitnesscopia, int *change){
     
 	for (int i = 0; i < POPSIZE; ++i)
 	{
@@ -819,8 +948,20 @@ void imprime(float *poblacion, int indSize, int salto, float *fitnesscopia){
 		{
 			printf("%f, ", poblacion[i*indSize+j]);
 		}
-		printf("fitness %f\n", fitnesscopia[i]);
+		printf("fitness %f, change %d \n\n", fitnesscopia[i], change[i]);
 	}
+	printf("\n");
+	printf("\n************************************************");
+}
+
+void imprimeBest(float *mejorIndividuo, int indSize, float fitness, int index){
+    
+	
+	for (int i = 0; i < indSize; ++i) {
+		printf("%f, ", mejorIndividuo[i]);
+	}
+	printf("fitness %f, index %d\n\n", fitness, index);
+	
 	printf("\n");
 	printf("\n");
 }
@@ -858,25 +999,25 @@ void *evolucionDiferencial(void *arg){
 	/*Creo valores aleatorios entre 0 y 1*/
 	CURAND_CALL( curandGenerateUniform(randomGenerator[device][control], randomFloatValues_D[device][control], (individuoSize_H-solucionSize_H)*POPSIZE*MAXRAND) );
 	inicializaPoblacion<<<malla,bloque>>>(poblacion_D[device][control],individuoSize_H,GSize_H,HSize_H,AlphaSize_H,BetaSize_H,solucionSize_H,randomFloatValues_D[device][control], bestSoFar_D[device][control], numBSF_D[device][control]);
-	cudaStream_t streams[numeroGenes];
-	for (int i = 0; i < numeroGenes; ++i){
-		CUDA_CALL( cudaStreamCreate(&streams[i]) );
-		evaluaPoblacion<<<1,bloque>>>(poblacion_D[device][control],datosReales_D[device][serie],W_D[device][control],K_D[device][control],numeroTiempos,numeroGenes,h,individuoSize_H,fitness_D[device][control], auxiliar[device][control], i);				
-	}
+	evaluaPoblacion<<<1,bloque>>>(poblacion_D[device][control],datosReales_D[device][serie],W_D[device][control],K_D[device][control],numeroTiempos,numeroGenes,h,individuoSize_H,fitness_D[device][control], auxiliar[device][control]);				
+
+	float *poblacionActual;
+	float *fitnesscopia;
+	int *changeInd;
 
 	for(generaciones = 0 ; generaciones < GMAX; generaciones++){
-		randControl++;
+		randControl+=4;
 		// Calcula los indices aleatorios para la cruza y mutacion
-		calculaIndicesAleatorios<<<1,1>>>(randomIndices_D[device][control],rand());
+		calculaIndicesAleatorios<<<1,bloque>>>(randomIndices_D[device][control],rand());
 		// Crea la poblacion siguiente
 		cruzaPoblacion<<<malla,bloque>>>(poblacion_D[device][control],nuevaPoblacion_D[device][control],individuoSize_H,solucionSize_H,Cr,randomFloatValues_D[device][control],randomIndices_D[device][control], randControl);
 		// Evalua la poblacion siguiente
 
-		for (int i = 0; i < numeroGenes; ++i){
-			evaluaPoblacion<<<1,bloque, 0, streams[i]>>>(nuevaPoblacion_D[device][control],datosReales_D[device][serie],W_D[device][control],K_D[device][control],numeroTiempos,numeroGenes,h,individuoSize_H,nuevoFitness_D[device][control], auxiliar[device][control], i);			
-	
-		}	
-		CUDA_CALL( cudaThreadSynchronize() );
+		//cudaStream_t streams[numeroGenes];
+
+		evaluaPoblacion<<<1,bloque>>>(nuevaPoblacion_D[device][control],datosReales_D[device][serie],W_D[device][control],K_D[device][control],numeroTiempos,numeroGenes,h,individuoSize_H,nuevoFitness_D[device][control], auxiliar[device][control]);			
+		
+		//CUDA_CALL( cudaThreadSynchronize() );
 		// Calculo los individuos que deben cambiarse
 		comparaPoblacion<<<1,1>>>(fitness_D[device][control],nuevoFitness_D[device][control],mustChange_D[device][control]);
 		// Cambio las variables de los individuos que fueron peores, la bandera que indica esto esta en mustChange_D
@@ -888,15 +1029,15 @@ void *evolucionDiferencial(void *arg){
 		// Cr -= (0.002);
 
 		// Se calcula el BFS y el numero de repeticiones del mismo
-		CUDA_CALL( cudaThreadSynchronize() );
+		//CUDA_CALL( cudaThreadSynchronize() );
 		obtenerMetricas<<<1,1>>>(bestSoFar_D[device][control], MSE_D[device][control], RMSE_D[device][control], fitness_D[device][control], numBSF_D[device][control], idBSF[device][control]);
 		
 		if (generaciones % 50 == 0 && generaciones != 0){
-		 	printf("\t\tDevice %d, Thread %d, Corrida %d, Generacion %d, BestSoFar %f, MSE %f, RMSE %f\n", device, control, corrida, generaciones, *bestSoFar[device][control], *MSE[device][control], *RMSE[device][control]);
+		 	printf("\t\tED - Device %d, Thread %d, Corrida %d, Generacion %d, BestSoFar %f, MSE %f, RMSE %f\n", device, control, corrida, generaciones, *bestSoFar[device][control], *MSE[device][control], *RMSE[device][control]);
 		}
 		
 
-		if (*numBSF[device][control] >= DIVERSIDAD && DIVERSIDAD > 0) {
+		if (*numBSF[device][control] >= DIVERSIDAD && DIVERSIDAD > 0 ){ //|| generaciones+1 == GMAX) {
 			randControl++;
 			// Se calcula la distancia de cada individuo con la poblacion
 			calculaDistancia<<<malla,bloque>>>(poblacion_D[device][control],numeroGenes,individuoSize_H,fitness_D[device][control],goodness_D[device][control], auxiliar[device][control], MValor, bestSoFar_D[device][control]);				
@@ -905,9 +1046,7 @@ void *evolucionDiferencial(void *arg){
 			// Crea diversidad en la poblacion reemplazando los individuos con un goodness mayor al calculado previamente
 			diversifica<<<malla,bloque>>>(poblacion_D[device][control], goodness_D[device][control],individuoSize_H,GSize_H,HSize_H,AlphaSize_H,BetaSize_H, solucionSize_H,randomFloatValues_D[device][control], minGoodness[device][control], randControl);
 			// Evalua la nueva poblacion
-			for (int i = 0; i < numeroGenes; ++i){
-				evaluaPoblacion<<<1,bloque>>>(poblacion_D[device][control],datosReales_D[device][serie],W_D[device][control],K_D[device][control],numeroTiempos,numeroGenes,h,individuoSize_H,fitness_D[device][control], auxiliar[device][control], i);				
-			}
+			evaluaPoblacion<<<1,bloque>>>(poblacion_D[device][control],datosReales_D[device][serie],W_D[device][control],K_D[device][control],numeroTiempos,numeroGenes,h,individuoSize_H,fitness_D[device][control], auxiliar[device][control]);				
 			// Reinicia el contador de BSF para permitirle evolucionar
 			*numBSF[device][control] = 0;
 			nDiversidad++;
@@ -915,16 +1054,27 @@ void *evolucionDiferencial(void *arg){
 			CUDA_CALL( cudaThreadSynchronize() );
 			obtenerMetricas<<<1,1>>>(bestSoFar_D[device][control], MSE_D[device][control], RMSE_D[device][control], fitness_D[device][control], numBSF_D[device][control], idBSF[device][control]);
 		
-			printf("\t\t***Device %d, Thread %d, Corrida %d, Generacion %d, BestSoFar %f, MSE %f, RMSE %f\n", device, control, corrida, generaciones, *bestSoFar[device][control], *MSE[device][control], *RMSE[device][control]);
+			printf("\t\tDiversidad - Device %d, Thread %d, Corrida %d, Generacion %d, BestSoFar %f, MSE %f, RMSE %f\n", device, control, corrida, generaciones, *bestSoFar[device][control], *MSE[device][control], *RMSE[device][control]);
 		
 		}
 
-		if (randControl == MAXRAND-1){
-			CURAND_CALL( curandGenerateUniform(randomGenerator[device][control], randomFloatValues_D[device][control], (individuoSize_H-solucionSize_H)*POPSIZE*MAXRAND) );
-			randControl = -1;
-			printf("\t\t*** %d ***\n", generaciones);
+		iniSwarm<<<malla,bloque>>>(poblacion_D[device][control], nuevaPoblacion_D[device][control], individuoSize_H, auxiliar[device][control], randomFloatValues_D[device][control]);
+		swarmPSO<<<malla,bloque>>>(nuevaPoblacion_D[device][control], (poblacion_D[device][control]+*idBSF[device][control]*individuoSize_H), poblacion_D[device][control], auxiliar[device][control], individuoSize_H, solucionSize_H, randomFloatValues_D[device][control], GSize_H, HSize_H, AlphaSize_H, BetaSize_H);
+		evaluaPoblacion<<<1,bloque>>>(nuevaPoblacion_D[device][control], datosReales_D[device][serie], W_D[device][control], K_D[device][control], numeroTiempos, numeroGenes, h, individuoSize_H, nuevoFitness_D[device][control], auxiliar[device][control]);				
+		comparaPoblacion<<<1,bloque>>>(fitness_D[device][control],nuevoFitness_D[device][control],mustChange_D[device][control]);
+		seleccionaPoblacion<<<malla,bloque>>>(poblacion_D[device][control], nuevaPoblacion_D[device][control], mustChange_D[device][control], individuoSize_H);		
+		seleccionaFitness<<<malla,bloque>>>(fitness_D[device][control], nuevoFitness_D[device][control], mustChange_D[device][control], 1);		
+		
+		if (generaciones % 50 == 0 && generaciones != 0){
+			printf("\t\tPSO - Device %d, Thread %d, Corrida %d, Iteracion %d, BestSoFar %f, MSE %f, RMSE %f\n", device, control, corrida, generaciones, *bestSoFar[device][control], *MSE[device][control], *RMSE[device][control]);
 		}
-		cudaStreamSynchronize(0);
+
+		if (randControl == MAXRAND-5){
+			CURAND_CALL( curandGenerateUniform(randomGenerator[device][control], randomFloatValues_D[device][control], (individuoSize_H-solucionSize_H)*POPSIZE*MAXRAND) );
+			randControl = -4;
+			//printf("\t\t*** %d ***\n", generaciones);
+		}
+		//CUDA_CALL( cudaStreamSynchronize(0) );
 	}
 
 	CUDA_CALL( cudaThreadSynchronize() );
@@ -933,19 +1083,19 @@ void *evolucionDiferencial(void *arg){
 	mse = *MSE_D[device][control];
 	rmse = *RMSE_D[device][control];
 
+	printf("\t\tED - Corrida %d, Device %d, Thread %d, bestF %f, MSE %f, RMSE %f, nDiversidad %d\n",corrida ,device ,control, bestF, mse, rmse, nDiversidad);
+	
+
 	CUDA_CALL( cudaMemcpy(mejorIndividuo[device][control],(poblacion_D[device][control]+best*individuoSize_H),sizeof(float)*individuoSize_H,cudaMemcpyDeviceToHost) );
 	args -> resultado = bestF;
-	liberaMemoriaDevice(device, control);
 
+
+	liberaMemoriaDevice(device, control);
 	cudaEventRecord(stop[corrida], 0);
 	cudaEventSynchronize(stop[corrida]);
 	cudaEventElapsedTime(&timeC, start[corrida], stop[corrida]);
 
 	tiempos[serie][corrida] = timeC;
-
-	printf("\t\tCorrida %d, Device %d, Thread %d, bestF %f, MSE %f, RMSE %f, nDiversidad %d\n",corrida ,device ,control, bestF, mse, rmse, nDiversidad);
-			
-
 	pthread_exit(NULL);
 }
 
@@ -1091,7 +1241,9 @@ void RRG(char *inFile, char *outFile){
 	printf("-------------------------------------------------------------------------------------------------------------------------------\n");
 	printf("\tEntrada %s   | Salida %s\n",inFile, outFile);
 	printf("-------------------------------------------------------------------------------------------------------------------------------\n");
-	printf("\tPoblacion  %d | Generaciones %d | Diversidad %d | PDiversidad %f\n", POPSIZE, GMAX, DIVERSIDAD, REMPDIV);
+	printf("\tPoblacion  %d | Generaciones %d | Diversidad %d | PDiversidad %f | Umbral %f\n", POPSIZE, GMAX, DIVERSIDAD, REMPDIV, UMBR);
+	printf("-------------------------------------------------------------------------------------------------------------------------------\n");
+	printf("\tW  %f | C1 %f | C2 %f | Iteraciones PSO %d\n", WPSO, C1, C2, PSOGEN);
 	printf("-------------------------------------------------------------------------------------------------------------------------------\n");
 	printf("\tCorridas   %d | STREAMS      %d | GPUs       %d | Profundidad %d | Coef Penalización %f\n",CORRIDAS, STREAMS, GPUS, PROF, PCOEF);
 	// Initialisa y configura el thread joinable
@@ -1127,6 +1279,7 @@ void RRG(char *inFile, char *outFile){
 		for(int i = 0; i <numGpus; i++){
 			datosReales_D[i][k] = (float*) malloc(sizeof(float)*numeroGenes*numeroTiempos);
 			CUDA_CALL( cudaSetDevice(i) );
+			CUDA_CALL( cudaDeviceReset() );
 			CUDA_CALL( cudaMalloc(&datosReales_D[i][k],sizeof(float)*numeroGenes*numeroTiempos) );
 			CUDA_CALL( cudaMemcpy(datosReales_D[i][k], datosReales, sizeof(float)*numeroGenes*numeroTiempos,cudaMemcpyHostToDevice) );
 		
