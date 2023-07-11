@@ -1,10 +1,9 @@
 import graphviz as gv
 import numpy as np
 
-archivo = 'salidaParam'
-nGenes = 5
-#path = '/Users/lti/Dropbox/Maestria/Tesis/Paralelizacion/'
-path = '/media/af/DATA/Dropbox/Maestria/Tesis/Paralelizacion/'
+archivo = 'salida'
+nGenes = 2
+path = 'Z:/'
 
 salida = path + 'Salidas/'+archivo+'.txt'
 valoresOrd = {}
