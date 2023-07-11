@@ -18,6 +18,7 @@ cuda-memcheck --leak-check full --racecheck-report all ./test Instancias/Tominag
 
 ## References
 [Notes](https://icl.utk.edu/~mgates3/docs/cuda.html)
+
 [CUDA C Programing Guide](https://docs.nvidia.com/cuda/pdf/CUDA_C_Programming_Guide.pdf)
-[CUDA By Example Book](https://github.com/CodedK/CUDA-by-Example-source-code-for-the-book-s-examples-)
+
 [CUDA By Example Code](https://github.com/CodedK/CUDA-by-Example-source-code-for-the-book-s-examples-)
