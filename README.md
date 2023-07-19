@@ -1,5 +1,4 @@
 # CUDA Accelerated Memetic Algorithm
-![CC0 Public Domain](https://images.cloudclusters.io/4fb7c02dfa2041a28b9eb2c14dc999cd/g-banner.jpg)
 
 ## Requeriments
 Ubuntu 16.04
