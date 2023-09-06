@@ -2,8 +2,8 @@ from pylab import *
 import numpy  
 from matplotlib.legend_handler import HandlerLine2D
 
-archivo = 'salida'
-graficar = 20
+archivo = 'DE-PSO-256'
+graficar = 3
 
 path = 'Z:/'
 

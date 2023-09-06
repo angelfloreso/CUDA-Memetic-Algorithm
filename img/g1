@@ -1,0 +1,5 @@
+digraph {
+	1 -> 2 [style=dashed]
+	2 -> 1 [style=dashed]
+	2 -> 2 [style=dashed]
+}

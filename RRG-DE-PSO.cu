@@ -17,16 +17,16 @@
 #include <curand_kernel.h>
 #include <pthread.h>
 
-#define POPSIZE 256 								// Tamano de la poblacion
-#define GMAX	1000								// Numero de generaciones
-#define PSOGEN 	500							// Numero de iteraciones PSO
+#define POPSIZE 64 								// Tamano de la poblacion
+#define GMAX	500								// Numero de generaciones
+#define PSOGEN 	200							// Numero de iteraciones PSO
 #define FPARAM  0.04f								// Parametro F para la ED
-#define MAXRAND 50       							// Tamano del vector de valores random
+#define MAXRAND 64       							// Tamano del vector de valores random
 
-#define HILOS_X 16									// Hilos y Bloques para Kernels
-#define HILOS_Y 16
-#define BLOQUES_X 16
-#define BLOQUES_Y 16
+#define HILOS_X 8									// Hilos y Bloques para Kernels
+#define HILOS_Y 8
+#define BLOQUES_X 8
+#define BLOQUES_Y 8
 
 #define MAXGij  4.0									// Rangos de exploracion
 #define MINGij -4.0
@@ -40,8 +40,8 @@
 /**
     Variables de rendimiento
 */
-#define CORRIDAS 20									// Numero de corridas
-#define STREAMS 2									// Procesos simultaneos
+#define CORRIDAS 10									// Numero de corridas
+#define STREAMS 1									// Procesos simultaneos
 #define GPUS 0 										// Maximos de GPUs (0 = Sin limite)
 
 /**
@@ -1017,7 +1017,7 @@ void *evolucionDiferencial(void *arg){
 
 		evaluaPoblacion<<<1,bloque>>>(nuevaPoblacion_D[device][control],datosReales_D[device][serie],W_D[device][control],K_D[device][control],numeroTiempos,numeroGenes,h,individuoSize_H,nuevoFitness_D[device][control], auxiliar[device][control]);			
 		
-		//CUDA_CALL( cudaThreadSynchronize() );
+		CUDA_CALL( cudaThreadSynchronize() );
 		// Calculo los individuos que deben cambiarse
 		comparaPoblacion<<<1,1>>>(fitness_D[device][control],nuevoFitness_D[device][control],mustChange_D[device][control]);
 		// Cambio las variables de los individuos que fueron peores, la bandera que indica esto esta en mustChange_D
@@ -1029,7 +1029,7 @@ void *evolucionDiferencial(void *arg){
 		// Cr -= (0.002);
 
 		// Se calcula el BFS y el numero de repeticiones del mismo
-		//CUDA_CALL( cudaThreadSynchronize() );
+		CUDA_CALL( cudaThreadSynchronize() );
 		obtenerMetricas<<<1,1>>>(bestSoFar_D[device][control], MSE_D[device][control], RMSE_D[device][control], fitness_D[device][control], numBSF_D[device][control], idBSF[device][control]);
 		
 		if (generaciones % 50 == 0 && generaciones != 0){
@@ -1074,7 +1074,7 @@ void *evolucionDiferencial(void *arg){
 			randControl = -4;
 			//printf("\t\t*** %d ***\n", generaciones);
 		}
-		//CUDA_CALL( cudaStreamSynchronize(0) );
+		CUDA_CALL( cudaStreamSynchronize(0) );
 	}
 
 	CUDA_CALL( cudaThreadSynchronize() );
